@@ -3,16 +3,23 @@ package apache
 import (
 	"os"
 
+	"github.com/urso/ucfg"
+
 	"github.com/elastic/beats/metricbeat/helper"
 )
 
 func init() {
-	helper.Registry.AddModuler("apache", Moduler{})
+	helper.Registry.AddModuler("apache", New)
+}
+
+// New creates new instance of Moduler
+func New() helper.Moduler {
+	return &Moduler{}
 }
 
 type Moduler struct{}
 
-func (r Moduler) Setup() error {
+func (r Moduler) Setup(cfg *ucfg.Config) error {
 	return nil
 }
 

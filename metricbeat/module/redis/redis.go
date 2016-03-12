@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/garyburd/redigo/redis"
+	"github.com/urso/ucfg"
 
 	"github.com/elastic/beats/libbeat/logp"
 
@@ -11,12 +12,17 @@ import (
 )
 
 func init() {
-	helper.Registry.AddModuler("redis", Moduler{})
+	helper.Registry.AddModuler("redis", New)
+}
+
+// New creates new instance of Moduler
+func New() helper.Moduler {
+	return &Moduler{}
 }
 
 type Moduler struct{}
 
-func (r Moduler) Setup() error {
+func (r Moduler) Setup(cfg *ucfg.Config) error {
 	return nil
 }
 

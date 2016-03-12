@@ -1,14 +1,17 @@
 package helper
 
 import (
+	"sort"
 	"sync"
 	"time"
 
 	"fmt"
+
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
-	"sort"
+
+	"github.com/urso/ucfg"
 )
 
 // Module specifics. This must be defined by each module
@@ -21,6 +24,9 @@ type Module struct {
 	// Module config
 	Config ModuleConfig
 
+	// Raw config object to be unpacked by moduler
+	cfg *ucfg.Config
+
 	// List of all metricsets in this module. Use to keep track of metricsets
 	metricSets map[string]*MetricSet
 
@@ -31,15 +37,27 @@ type Module struct {
 }
 
 // NewModule creates a new module
-func NewModule(config ModuleConfig, moduler Moduler) *Module {
+func NewModule(cfg *ucfg.Config, moduler func() Moduler) (*Module, error) {
+
+	// Module config defaults
+	config := ModuleConfig{
+		Period: "1s",
+	}
+
+	err := cfg.Unpack(&config)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Module{
 		name:       config.Module,
 		Config:     config,
-		moduler:    moduler,
+		cfg:        cfg,
+		moduler:    moduler(),
 		metricSets: map[string]*MetricSet{},
 		wg:         sync.WaitGroup{},
 		done:       make(chan struct{}),
-	}
+	}, nil
 }
 
 // Starts the given module
@@ -53,7 +71,7 @@ func (m *Module) Start(b *beat.Beat) error {
 	}
 
 	logp.Info("Setup moduler: %s", m.name)
-	err := m.moduler.Setup()
+	err := m.moduler.Setup(m.cfg)
 	if err != nil {
 		return fmt.Errorf("Error setting up module: %s. Not starting metricsets for this module.", err)
 	}
@@ -145,13 +163,17 @@ func (m *Module) FetchMetricSets(b *beat.Beat, metricSet *MetricSet) {
 	events, err := metricSet.Fetch()
 
 	if err != nil {
-		// TODO: Also list module?
-		logp.Err("Fetching events in MetricSet %s returned error: %s", metricSet.Name, err)
-		// TODO: Still publish event with error
-		return
-	}
+		logp.Err("Fetching events for MetricSet %s in Module %s returned error: %s", metricSet.Name, m.name, err)
 
-	events, err = m.processEvents(events, metricSet)
+		// Publish event with error
+		event := common.MapStr{
+			"error": err.Error(),
+		}
+		event = m.createEvent(event, common.Time(time.Now()), metricSet.Name)
+		events = append(events, event)
+	} else {
+		events, err = m.processEvents(events, metricSet)
+	}
 
 	// Async publishing of event
 	b.Events.PublishEvents(events)
@@ -207,38 +229,47 @@ func (m *Module) getMetricSetsList() string {
 func (m *Module) processEvents(events []common.MapStr, metricSet *MetricSet) ([]common.MapStr, error) {
 	newEvents := []common.MapStr{}
 
-	// Default name is empty, means it will be metricbeat
-	indexName := ""
-	typeName := "metricsets"
 	timestamp := common.Time(time.Now())
 
 	for _, event := range events {
-		// Set meta information dynamic if set
-		indexName = getIndex(event, indexName)
-		typeName = getType(event, typeName)
-		timestamp = getTimestamp(event, timestamp)
-
-		// Each metricset has a unique eventfieldname to prevent type conflicts
-		eventFieldName := m.name + "-" + metricSet.Name
-
-		// TODO: Add fields_under_root option for "metrics"?
-		event = common.MapStr{
-			"type":         typeName,
-			eventFieldName: event,
-			"metricset":    metricSet.Name,
-			"module":       m.name,
-			"@timestamp":   timestamp,
-		}
-
-		// Overwrite index in case it is set
-		if indexName != "" {
-			event["beat"] = common.MapStr{
-				"index": indexName,
-			}
-		}
+		event = m.createEvent(event, timestamp, metricSet.Name)
 
 		newEvents = append(newEvents, event)
 	}
 
 	return newEvents, nil
+}
+
+func (m *Module) createEvent(event common.MapStr, timestamp common.Time, metricSetName string) common.MapStr {
+
+	// Default name is empty, means it will be metricbeat
+	indexName := ""
+	typeName := "metricsets"
+
+	// Set meta information dynamic if set
+	indexName = getIndex(event, indexName)
+	typeName = getType(event, typeName)
+	timestamp = getTimestamp(event, timestamp)
+
+	// Each metricset has a unique eventfieldname to prevent type conflicts
+	eventFieldName := m.name + "-" + metricSetName
+
+	// TODO: Add fields_under_root option for "metrics"?
+	event = common.MapStr{
+		"type":                  typeName,
+		eventFieldName:          event,
+		"metricset":             metricSetName,
+		"module":                m.name,
+		"@timestamp":            timestamp,
+		common.EventMetadataKey: m.Config.EventMetadata,
+	}
+
+	// Overwrite index in case it is set
+	if indexName != "" {
+		event["beat"] = common.MapStr{
+			"index": indexName,
+		}
+	}
+
+	return event
 }
