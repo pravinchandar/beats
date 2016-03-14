@@ -94,19 +94,25 @@ func (radius *RADIUS) ParseUdp(pkt *protos.Packet) {
 	//XXX Process error
 	rPayload, _ := sanitiseRadius(pkt)
 
+	if _, ok := radius.transaction[rPayload.ipPortHash]; !ok {
+		radius.transaction[rPayload.ipPortHash] = pktIdChan{pktId: rPayload.identifier, response: make(chan int)}
+	}
+
+	c := radius.transaction[rPayload.ipPortHash].response
+
 	switch rPayload.code {
 	case ACCESS_REQUEST:
-		go radiusReqHandler(rPayload, radius)
+		go radiusReqHandler(rPayload, radius, c)
 	case ACCESS_ACCEPT:
-		go radiusResHandler(rPayload, radius)
+		go radiusResHandler(rPayload, radius, c)
 	case ACCESS_REJECT:
-		go radiusResHandler(rPayload, radius)
+		go radiusResHandler(rPayload, radius, c)
 	case ACCOUNTING_REQUEST:
-		go radiusReqHandler(rPayload, radius)
+		go radiusReqHandler(rPayload, radius, c)
 	case ACCOUNTING_RESPONSE:
-		go radiusResHandler(rPayload, radius)
+		go radiusResHandler(rPayload, radius, c)
 	case ACCESS_CHALLENGE:
-		go radiusResHandler(rPayload, radius)
+		go radiusResHandler(rPayload, radius, c)
 	default:
 		return
 	}
@@ -117,19 +123,16 @@ func (radius *RADIUS) ParseUdp(pkt *protos.Packet) {
 // and initialises a channel that is only shared between it and
 // the resHandler, the resHandler knows about this channel based on its
 // packet identifier and rPayload.ipPortHash
-func radiusReqHandler(rPayload *radiusPayload, r *RADIUS) {
-	r.transaction[rPayload.ipPortHash] = pktIdChan{pktId: rPayload.identifier, response: make(chan int)}
-	fmt.Println("XXX req transaction", r.transaction)
+func radiusReqHandler(rPayload *radiusPayload, r *RADIUS, resChan chan int) {
+	fmt.Println("REQ handler", rPayload.identifier)
 }
 
 // The resHandler makes use of the channel initialised by the reqHandler
 // and sends a "ping" on the channel to let the reqHandler know that there
 // is a response from the RADIUS server for the request. The connection is
 // said to be closed when resHandler sends a "ping" to the reqHandler
-func radiusResHandler(rPayload *radiusPayload, r *RADIUS) {
-	if _, ok := r.transaction[rPayload.ipPortHash]; ok {
-		fmt.Println("XXX res transaction", r.transaction)
-	}
+func radiusResHandler(rPayload *radiusPayload, r *RADIUS, resChan chan int) {
+	fmt.Println("RES handler", rPayload.identifier)
 }
 
 // This function takes in the captured RADIUS packet and shoves
