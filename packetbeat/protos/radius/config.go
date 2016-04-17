@@ -12,7 +12,7 @@ type radiusConfig struct {
 var (
 	defaultConfig = radiusConfig{
 		ProtocolCommon: config.ProtocolCommon{
-			Ports:              []int{1813},
+			Ports:              []int{1813, 1812},
 			TransactionTimeout: protos.DefaultTransactionTimeout,
 		},
 	}
